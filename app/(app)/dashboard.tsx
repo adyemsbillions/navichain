@@ -4,7 +4,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +14,9 @@ import {
   View,
   useColorScheme,
 } from "react-native";
+
+// ✅ API base
+const API_BASE = "https://navichain.cravii.ng/api";
 
 // Simple theme type
 type Theme = "light" | "dark";
@@ -38,6 +43,26 @@ const darkTheme = {
   success: "#10b981",
 };
 
+type DashboardStats = {
+  active: number;
+  on_time_percent: number;
+  items: number;
+  updated_at: string | null;
+  core_modules: number;
+  sub_modules: number;
+};
+
+// ✅ Fake Banner Ads (wide + short)
+type BannerAd = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  cta: string;
+  link: string;
+  tag?: string;
+  icon?: keyof typeof MaterialIcons.glyphMap;
+};
+
 export default function Dashboard() {
   const systemColorScheme = useColorScheme();
   const [theme, setTheme] = useState<Theme>(
@@ -47,8 +72,69 @@ export default function Dashboard() {
 
   // responsive sizing
   const { width } = Dimensions.get("window");
-
   const colors = theme === "dark" ? darkTheme : lightTheme;
+
+  // ✅ stats state
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState("");
+  const [stats, setStats] = useState<DashboardStats>({
+    active: 0,
+    on_time_percent: 0,
+    items: 0,
+    updated_at: null,
+    core_modules: 0,
+    sub_modules: 0,
+  });
+
+  // ✅ banner ads
+  const bannerAds: BannerAd[] = [
+    {
+      id: "b1",
+      tag: "Sponsored Ads",
+      title: "Ship Faster with NaviChain",
+      subtitle: "Track deliveries and performance in one place.",
+      cta: "Open",
+      link: "https://navichain.cravii.ng",
+      icon: "local-shipping",
+    },
+    {
+      id: "b2",
+      tag: "Sponsored Ads",
+      title: "Vendor Verification",
+      subtitle: "Reduce supply risk with proper vendor checks.",
+      cta: "Learn",
+      link: "https://example.com",
+      icon: "verified",
+    },
+    {
+      id: "b3",
+      tag: "Sponsored Ads",
+      title: "Green Supply Chain Tips",
+      subtitle: "Cut cost & emissions with better routing.",
+      cta: "See",
+      link: "https://example.com",
+      icon: "eco",
+    },
+  ];
+
+  const [bannerIndex, setBannerIndex] = useState(0);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      setBannerIndex((p) => (p + 1) % bannerAds.length);
+    }, 6500);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const currentBanner = bannerAds[bannerIndex];
+
+  const openAd = async (link: string) => {
+    try {
+      const ok = await Linking.canOpenURL(link);
+      if (ok) await Linking.openURL(link);
+    } catch {}
+  };
 
   useEffect(() => {
     const loadUser = async () => {
@@ -65,6 +151,46 @@ export default function Dashboard() {
     loadUser();
   }, []);
 
+  const fetchStats = async () => {
+    try {
+      setStatsError("");
+      setStatsLoading(true);
+
+      const res = await fetch(`${API_BASE}/get_dashboard_stats.php`);
+      const raw = await res.text();
+
+      let data: any = null;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error(
+          `Non-JSON response (${res.status}): ${raw.slice(0, 120)}`,
+        );
+      }
+
+      if (!res.ok || data?.status !== "success") {
+        throw new Error(data?.message || `Request failed (${res.status})`);
+      }
+
+      setStats({
+        active: Number(data.stats.active || 0),
+        on_time_percent: Number(data.stats.on_time_percent || 0),
+        items: Number(data.stats.items || 0),
+        updated_at: data.stats.updated_at ?? null,
+        core_modules: Number(data.stats.core_modules || 0),
+        sub_modules: Number(data.stats.sub_modules || 0),
+      });
+    } catch (e: any) {
+      setStatsError(e?.message || "Failed to load stats.");
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+  }, []);
+
   const toggleTheme = () => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
@@ -74,7 +200,7 @@ export default function Dashboard() {
     router.replace("/");
   };
 
-  // ✅ Added Green Supply Chain (id: 7)
+  // ✅ Core modules (Green is id: 7)
   const coreModules = [
     { id: 1, title: "Knowledge", icon: "book", color: "#3b82f6" },
     { id: 2, title: "Vendors", icon: "shopping-cart", color: "#8b5cf6" },
@@ -99,20 +225,20 @@ export default function Dashboard() {
     return Math.floor(usable / numColumns);
   }, [width, numColumns]);
 
-  // Bottom navigation items
   const navItems = [
     { name: "Home", icon: "home", route: "/dashboard", active: true },
     { name: "Knowledge", icon: "school", route: "/knowledge" },
     { name: "Modules", icon: "view-module", route: "/update_modules" },
-    // IMPORTANT: /submodules requires coreId, so we open "all submodules" chooser:
-    // We'll route to dashboard grid instead. So this opens first module by default.
-    // If you want a picker screen later, tell me.
     { name: "Submodules", icon: "grid-view", route: "/submodules?coreId=1" },
   ];
 
+  const formatItems = (n: number) => {
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+    return String(n);
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Main Content */}
       <ScrollView
         style={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
@@ -120,11 +246,9 @@ export default function Dashboard() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            {/* NAVICHAIN above Welcome back */}
             <Text style={[styles.brandTitle, { color: colors.textSecondary }]}>
               NAVICHAIN
             </Text>
-
             <Text style={[styles.greeting, { color: colors.textSecondary }]}>
               Welcome back,
             </Text>
@@ -150,53 +274,176 @@ export default function Dashboard() {
 
         {/* Stats */}
         <View style={styles.statsContainer}>
-          <View
-            style={[
-              styles.statCard,
-              { backgroundColor: colors.card, borderColor: colors.border },
-            ]}
-          >
+          {statsLoading ? (
+            <View
+              style={[
+                styles.statsLoadingBox,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <ActivityIndicator color={colors.accent} />
+              <Text style={{ color: colors.textSecondary, fontWeight: "700" }}>
+                Loading stats...
+              </Text>
+            </View>
+          ) : statsError ? (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={fetchStats}
+              style={[
+                styles.statsLoadingBox,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <MaterialIcons
+                name="error-outline"
+                size={18}
+                color={colors.danger}
+              />
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  fontWeight: "700",
+                  flex: 1,
+                }}
+              >
+                {statsError}
+              </Text>
+              <Text style={{ color: colors.accent, fontWeight: "900" }}>
+                Retry
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <>
+              <View
+                style={[
+                  styles.statCard,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+              >
+                <MaterialIcons
+                  name="local-shipping"
+                  size={20}
+                  color={colors.accent}
+                />
+                <Text style={[styles.statValue, { color: colors.text }]}>
+                  {stats.active}
+                </Text>
+                <Text
+                  style={[styles.statLabel, { color: colors.textSecondary }]}
+                >
+                  Active
+                </Text>
+              </View>
+
+              <View
+                style={[
+                  styles.statCard,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+              >
+                <MaterialIcons
+                  name="trending-up"
+                  size={20}
+                  color={colors.success}
+                />
+                <Text style={[styles.statValue, { color: colors.text }]}>
+                  {stats.on_time_percent}%
+                </Text>
+                <Text
+                  style={[styles.statLabel, { color: colors.textSecondary }]}
+                >
+                  On-Time
+                </Text>
+              </View>
+
+              <View
+                style={[
+                  styles.statCard,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+              >
+                <MaterialIcons name="inventory" size={20} color="#f59e0b" />
+                <Text style={[styles.statValue, { color: colors.text }]}>
+                  {formatItems(stats.items)}
+                </Text>
+                <Text
+                  style={[styles.statLabel, { color: colors.textSecondary }]}
+                >
+                  Items
+                </Text>
+              </View>
+            </>
+          )}
+        </View>
+
+        {/* ✅ Fake Banner Ad (wide + short) - BEFORE CORE MODULES */}
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => openAd(currentBanner.link)}
+          style={[
+            styles.bannerAd,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <View style={styles.bannerLeft}>
+            <View
+              style={[
+                styles.bannerIconWrap,
+                {
+                  backgroundColor: `${colors.accent}18`,
+                  borderColor: `${colors.accent}25`,
+                },
+              ]}
+            >
+              <MaterialIcons
+                name={(currentBanner.icon || "campaign") as any}
+                size={18}
+                color={colors.accent}
+              />
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <View style={styles.bannerTitleRow}>
+                <Text
+                  style={[styles.bannerTag, { color: colors.textSecondary }]}
+                >
+                  {currentBanner.tag || "Ad"}
+                </Text>
+              </View>
+
+              <Text
+                style={[styles.bannerTitle, { color: colors.text }]}
+                numberOfLines={1}
+              >
+                {currentBanner.title}
+              </Text>
+
+              {!!currentBanner.subtitle && (
+                <Text
+                  style={[
+                    styles.bannerSubtitle,
+                    { color: colors.textSecondary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {currentBanner.subtitle}
+                </Text>
+              )}
+            </View>
+          </View>
+
+          <View style={styles.bannerRight}>
+            <Text style={[styles.bannerCta, { color: colors.accent }]}>
+              {currentBanner.cta}
+            </Text>
             <MaterialIcons
-              name="local-shipping"
-              size={20}
+              name="arrow-forward-ios"
+              size={14}
               color={colors.accent}
             />
-            <Text style={[styles.statValue, { color: colors.text }]}>42</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-              Active
-            </Text>
           </View>
-
-          <View
-            style={[
-              styles.statCard,
-              { backgroundColor: colors.card, borderColor: colors.border },
-            ]}
-          >
-            <MaterialIcons
-              name="trending-up"
-              size={20}
-              color={colors.success}
-            />
-            <Text style={[styles.statValue, { color: colors.text }]}>98%</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-              On-Time
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.statCard,
-              { backgroundColor: colors.card, borderColor: colors.border },
-            ]}
-          >
-            <MaterialIcons name="inventory" size={20} color="#f59e0b" />
-            <Text style={[styles.statValue, { color: colors.text }]}>1.2K</Text>
-            <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
-              Items
-            </Text>
-          </View>
-        </View>
+        </TouchableOpacity>
 
         {/* Modules */}
         <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -269,9 +516,7 @@ export default function Dashboard() {
             key={item.name}
             style={styles.navItem}
             onPress={() => {
-              if (item.route !== "/dashboard") {
-                router.push(item.route);
-              }
+              if (item.route !== "/dashboard") router.push(item.route);
             }}
           >
             <MaterialIcons
@@ -327,8 +572,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     paddingHorizontal: 24,
     gap: 12,
-    marginBottom: 32,
+    marginBottom: 18,
   },
+
+  statsLoadingBox: {
+    flex: 1,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    flexDirection: "row",
+  },
+
   statCard: {
     flex: 1,
     padding: 16,
@@ -339,6 +596,65 @@ const styles = StyleSheet.create({
   },
   statValue: { fontSize: 24, fontWeight: "800", letterSpacing: -0.5 },
   statLabel: { fontSize: 12, fontWeight: "600" },
+
+  // ✅ Banner Ad styles (wide + short)
+  bannerAd: {
+    marginHorizontal: 24,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  bannerLeft: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  bannerIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bannerTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  bannerTag: {
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 2,
+  },
+  bannerTitle: {
+    fontSize: 13.5,
+    fontWeight: "900",
+    letterSpacing: -0.2,
+  },
+  bannerSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  bannerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginLeft: 12,
+  },
+  bannerCta: {
+    fontSize: 12.5,
+    fontWeight: "900",
+  },
 
   sectionTitle: {
     fontSize: 20,
